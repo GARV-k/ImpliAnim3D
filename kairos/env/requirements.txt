@@ -1,0 +1,7 @@
+# Installed on top of the container, which already provides torch 2.7 (CUDA 12.8), torchvision, numpy 1.26,
+# scipy, trimesh, opencv, pandas, matplotlib, rich, tqdm, imageio, torchmetrics, pybind11 and Cython.
+# Dependencies are resolved against the container's versions (see fetch.sh).
+jaxtyping==0.3.11       # type annotations of the vendored nerfstudio encodings (hash_imports/)
+scikit-image==0.26.0    # marching cubes in close.py and in the data tools
+libigl==2.6.3           # signed distances / winding numbers in close.py and in the data tools
+tensorboardX==2.6.5     # training logs

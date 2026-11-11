@@ -1,0 +1,4 @@
+# Pure-Python packages that depend on torch / torchvision. Those come from the container (an NVIDIA build that
+# is not on PyPI), so these are installed without dependency resolution.
+torch-ema==0.3
+lpips==0.1.4

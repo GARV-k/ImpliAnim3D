@@ -1,0 +1,3 @@
+# No aarch64 / cp312 wheel on PyPI: downloaded as source and compiled inside the container.
+pysdf==0.1.9
+PyMCubes==0.1.6
