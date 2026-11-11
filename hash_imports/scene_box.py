@@ -20,7 +20,6 @@ from dataclasses import dataclass
 from typing import Tuple, Union
 
 import torch
-import viser.transforms as vtf
 from jaxtyping import Float
 from torch import Tensor
 
@@ -112,6 +111,9 @@ class OrientedBox:
         pos: Tuple[float, float, float], rpy: Tuple[float, float, float], scale: Tuple[float, float, float]
     ):
         """Construct a box from position, rotation, and scale parameters."""
+        # imported here: viser is only needed by this method, which the SDF pipeline never calls
+        import viser.transforms as vtf
+
         R = torch.tensor(vtf.SO3.from_rpy_radians(rpy[0], rpy[1], rpy[2]).as_matrix())
         T = torch.tensor(pos)
         S = torch.tensor(scale)

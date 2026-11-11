@@ -113,10 +113,12 @@ class Trainer(object):
                  use_checkpoint="latest", # which ckpt to use at init time
                  use_tensorboardX=True, # whether to use tensorboard for logging
                  scheduler_update_every_step=False, # whether to call scheduler.step() after every train step
+                 train_net=False, # whether train() also updates the shared decoder (False: only the hash tables)
                 ):
-        
+
         self.name = name
         self.n = n
+        self.train_net = train_net
         self.mute = mute
         self.metrics = metrics
         self.local_rank = local_rank
@@ -587,9 +589,10 @@ class Trainer(object):
                 
             for enc_opt in self.enc_optimizers:
                 self.scaler.step(enc_opt)
-            # self.scaler.step(self.net_optimizer)
+            if self.train_net:
+                self.scaler.step(self.net_optimizer)
 
-            self.scaler.update()    
+            self.scaler.update()
 
             for idx,_ in enumerate(self.models):
                 if self.emas[idx] is not None:

@@ -37,45 +37,34 @@ def save_mesh(models, N=None,M=None,save_path='meshes_using_hashencoder/', resol
         print(f"==> Finished saving meshes.")
 
 if __name__ == '__main__':
-    # parser = argparse.ArgumentParser(description="Process two integers n and m.")
+    from pipeline_args import pipeline_parser, parse, as_dir
+    parser = pipeline_parser("Fit the hash table of an unseen mesh with the shared decoder of --workspace kept frozen.", epochs=1000)
+    parser.add_argument("--test-workspace", default="test/", help="where the fitted table of the unseen mesh is saved")
+    parser.add_argument("--test-obj", default=None, help="unseen mesh (default: <data-root>/40.obj)")
+    args = parse(parser)
 
-    # # Add arguments for n and m
-    # parser.add_argument("n", type=int, help=" n is the numerator for sampling of surface points")
-    # parser.add_argument("d", type=int, help="m is the denominator for sampling of surface points")
-    # parser.add_argument("hashmap_size", type=int, help="An integer value for log hashmap size")
-    # parser.add_argument("obj_no", type=int, help="An integer value for number of obj")
+    n = args.n
+    d = args.d
+    hashmap_size = args.hashmap_size
+    obj_no = args.obj_no
 
-    # # Parse arguments
-    # args = parser.parse_args()
+    obj_path_pre = args.data_root
 
-    # # Access the arguments
-    # n = args.n
-    # d = args.d
-    # hashmap_size = args.hashmap_size
-    # obj_no = args.obj_no
-    
-    n = 2
-    d = 3
-    hashmap_size = 10
-    obj_no = 12
-
-    obj_path_pre = 'data/obj_meshes'
-    
     # obj_path_pre_list = [
     #                         obj_path_pre+'/'
     #                         ,obj_path_pre+'_90/'
     #                         ,obj_path_pre+'_180/'
     #                         ,obj_path_pre+'_270/'
     #                     ]
-    workspace1 = f'test/'
-    workspace2 = f'hash_workspace_obj{obj_no}_{n}_{d}_{hashmap_size}/'
+    workspace1 = as_dir(args.test_workspace)
+    workspace2 = args.workspace
     # workspace3 = 'hash_workspace_obj12_7_8_10/'
     # workspace1 = f'Exp12/workspace/'
     # workspace2 = f'Exp11/'
     # _n = 1
     # idx_list = [360,180]
     # obj_list = [obj_path+f"{idx+1}.obj" for idx in range(_n) for obj_path in obj_path_pre_list]
-    obj_list = ['data/obj_meshes/40.obj']
+    obj_list = [args.test_obj or obj_path_pre+'/40.obj']
     _n = len(obj_list)
     print(f"total objs: {_n}")
     
@@ -93,7 +82,8 @@ if __name__ == '__main__':
                                     )
     
     
-    tcnn_network = torch.load(workspace2+'GT_mlp.pth')
+    # whole pickled modules: torch >= 2.6 only loads them with weights_only=False
+    tcnn_network = torch.load(workspace2+'GT_mlp.pth', weights_only=False)
     # tcnn_network.load_state_dict(mlp_state_dict)
     
     models = []
@@ -119,7 +109,7 @@ if __name__ == '__main__':
 
     # w = torch.load('w2.pth')  
     
-    lr = 1e-4
+    lr = args.lr
 
     from sdf.provider import SDFDataset
     from loss import mape_loss
@@ -129,7 +119,7 @@ if __name__ == '__main__':
     valid_loaders = []
     # for i in range(_n):
     for path in obj_list:
-        train_dataset = SDFDataset(path, size=100, num_samples=2**18,sample_ratio_n=n,sample_ratio_d=d)
+        train_dataset = SDFDataset(path, size=args.steps_per_epoch, num_samples=args.num_samples,sample_ratio_n=n,sample_ratio_d=d)
         train_loader = torch.utils.data.DataLoader(train_dataset, batch_size=1, shuffle=True)
         train_datasets.append(train_dataset)
         train_loaders.append(train_loader)
@@ -152,7 +142,7 @@ if __name__ == '__main__':
     # scheduler = lambda optimizer: optim.lr_scheduler.StepLR(optimizer, step_size=5, gamma=0.5)
     subset_n = _n
     trainer = Trainer('ngp', _n, models,workspace=workspace1, enc_optimizer=enc_optimizer,  net_optimizer=net_optimizer, criterion=criterion, ema_decay=0.95, fp16=False, lr_scheduler=None,scheduler_update_every_step=False)
-    trainer.train(train_loaders,1000,subset_n)
+    trainer.train(train_loaders,args.epochs,subset_n)
     # print(models[0].backbone.params)
     # w_state_dict = w.state_dict()
     # path = f"saved_models/w.pth"

@@ -65,32 +65,26 @@ def save_mesh(models, mode,no_of_rots,W=None,N=None,M=None,save_path='inferences
 
 if __name__ == '__main__':
 
-    # parser = argparse.ArgumentParser(description="Process two integers n and m.")
-
-    # Add arguments for n and m
-    # parser.add_argument("n", type=int, help="An integer value for n")
-    # parser.add_argument("d", type=int, help="An integer value for m")
-
-    # Parse arguments
-    # args = parser.parse_args()
-
-    # # Access the arguments
-    # n = args.n'
-    # d = args.d
+    from pipeline_args import pipeline_parser, parse, as_dir
+    parser = pipeline_parser("Apply the W of --workspace to the hash tables of the unrotated meshes and extract the meshes.", epochs=0)
+    parser.add_argument("--out", default="inferences/GT2/", help="directory for the extracted meshes")
+    parser.add_argument("--resolution", type=int, default=256, help="marching cubes resolution")
+    parser.add_argument("--no-of-rots", type=int, default=1, help="with k > 1, also apply W^2 ... W^k")
+    args = parse(parser)
 
     mode = 'normal'
     W = None
     N = None
-    M = None 
-    B1 = None 
+    M = None
+    B1 = None
     B2 = None
-    no_of_rots = 1
+    no_of_rots = args.no_of_rots
     # obj_path_pre = 'GT_objs/'
-    workspace1 = f'hash_workspace_obj12_2_3_10/'
+    workspace1 = args.workspace
     # workspace2 = 'hash_workspace_obj12_7_8_10/'
     # workspace1 = f'test/'
     # workspace2 = f'Exp11/'
-    _n = 25
+    _n = args.num_objs
     from sdf.network_tcnn import SDFNetwork            
     tcnn_network = tcnn.Network(
                                         n_input_dims=32,
@@ -115,9 +109,10 @@ if __name__ == '__main__':
         # model.encoder = torch.load(workspace1+f'/GT_enc{idx+10}_{n}_{d}_12.pth')
         # model.encoder = torch.load('hash_workspace_obj12_7_8_10/GT_enc.pth')
         # model.backbone = torch.load("hash_workspace_obj12_7_8_10/GT_mlp.pth")
-        model.encoder = torch.load(workspace1+ f'GT_enc_{2*idx}.pth')
+        # whole pickled modules: torch >= 2.6 only loads them with weights_only=False
+        model.encoder = torch.load(workspace1+ f'GT_enc_{2*idx}.pth', weights_only=False)
         # model.encoder.hash_table = torch.nn.Parameter(torch.load('new_hash_table.pth'))
-        model.backbone = torch.load(workspace1+"GT_mlp.pth")
+        model.backbone = torch.load(workspace1+"GT_mlp.pth", weights_only=False)
         models.append(model)
     # model2 = SDFNetwork(tcnn_network, encoding="hashgrid") 
     # models = [model, model2]
@@ -133,8 +128,8 @@ if __name__ == '__main__':
     # N = torch.load('hash_workspace_obj12_7_8_10/N.pth')
     # M = torch.load('hash_workspace_obj12_7_8_10/M.pth')
     # w = torch.load('w.pth')
-    W= torch.load(workspace1+'W.pth')
+    W= torch.load(workspace1+'W.pth', weights_only=False)
     # W = torch.matmul(W,W)# W2 = 2*W
-    
+
     #trainer.save_mesh(os.path.join(workspace1, 'results', 'output.ply'), 1024)
-    save_mesh(models,mode,no_of_rots,W,N,M,save_path='inferences/GT2/')     
+    save_mesh(models,mode,no_of_rots,W,N,M,save_path=as_dir(args.out),resolution=args.resolution)

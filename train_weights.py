@@ -40,51 +40,40 @@ def save_mesh(models, mode,W=None,N=None,M=None,save_path='meshes_using_hashenco
         print(f"==> Finished saving meshes.")
 
 if __name__ == '__main__':
-    parser = argparse.ArgumentParser(description="Process two integers n and m.")
+    from pipeline_args import pipeline_parser, parse
+    parser = pipeline_parser("Train W on the rotated meshes, with the hash tables and the decoder of --workspace kept frozen.", epochs=500)
+    args = parse(parser)
 
-    # Add arguments for n and m
-    # parser.add_argument("n", type=int, help="An integer value for n")
-    # parser.add_argument("d", type=int, help="An integer value for m")
-    # parser.add_argument("hashmap_size", type=int, help="An integer value for log hashmap size")
-    # parser.add_argument("obj_no", type=int, help="An integer value for number of obj")
-
-    # # Parse arguments
-    # args = parser.parse_args()
-
-    # # Access the arguments
-    # n = args.n
-    # d = args.d
-    # hashmap_size = args.hashmap_size
-    # obj_no = args.obj_no
-    n = 2
-    d = 3
-    hashmap_size = 10
-    obj_no = 12
+    n = args.n
+    d = args.d
+    hashmap_size = args.hashmap_size
+    obj_no = args.obj_no
     no_of_rotations = 1
     mode = 'normal'
     # obj_path_pre = 'datasets/W_dataset2/'
-    obj_path_pre='data/obj_meshes_90/'
-    _n = 25
+    obj_path_pre=args.data_root+'_90/'
+    _n = args.num_objs
     obj_list = [obj_path_pre+f"{idx+1}.obj" for idx in range(_n)]
     # obj_path_pre_list = [obj_path_pre+'_90/'
     #                     #  ,obj_path_pre+'_180/'
     #                     #,obj_path_pre+'_270/'
     #                     #  ,obj_path_pre+'_360/'
     #                      ]
-    workspace1 = f'hash_workspace_obj{obj_no}_{n}_{d}_{hashmap_size}/'
+    workspace1 = args.workspace
     # workspace2 = 'hash_workspace_obj12_7_8_10/'
 
     # _n = 10
     # obj_list = [obj_path_pre+f"{idx}.obj" for idx in range(_n)]
-    from sdf.network_tcnn import SDFNetwork        
-    
-    tcnn_network = torch.load(workspace1+'GT_mlp.pth')
+    from sdf.network_tcnn import SDFNetwork
+
+    # whole pickled modules: torch >= 2.6 only loads them with weights_only=False
+    tcnn_network = torch.load(workspace1+'GT_mlp.pth', weights_only=False)
     models = []
     for idx in range(_n):
         model = SDFNetwork(tcnn_network, encoding="hashgrid",hashmap_size=hashmap_size)
         # enc_state_dict = torch.load(f'saved_models/enc_{idx}.pth')
         # model.encoder.load_state_dict(enc_state_dict)
-        model.encoder = torch.load(workspace1+f'GT_enc_{2*idx}.pth')
+        model.encoder = torch.load(workspace1+f'GT_enc_{2*idx}.pth', weights_only=False)
         models.append(model)
         
     W=None
@@ -95,13 +84,16 @@ if __name__ == '__main__':
     
     dim = models[0].encoder.hash_table.shape[0]	
     print(f'W:{dim}x{dim}')    
-    # W = nn.Parameter(torch.randn(dim, dim, device='cuda', requires_grad=True))  #w-commment
     # N = nn.Parameter(torch.randn(dim, dim2, device='cuda', requires_grad=True))
     # M = nn.Parameter(torch.randn(dim2, dim, device='cuda', requires_grad=True))
-    
-    W = torch.load(workspace1+'W.pth')  
-    
-    lr = 1e-4
+
+    # continue from the W saved in the workspace if there is one, otherwise start from a random W
+    if os.path.exists(workspace1+'W.pth'):
+        W = torch.load(workspace1+'W.pth', weights_only=False)
+    else:
+        W = nn.Parameter(torch.randn(dim, dim, device='cuda', requires_grad=True))  #w-commment
+
+    lr = args.lr
 
     from sdf.provider import SDFDataset
     from loss import mape_loss  
@@ -120,7 +112,7 @@ if __name__ == '__main__':
     
     
     for i in range(_n):
-        train_dataset = SDFDataset(obj_list[i], size=100, num_samples=2**18,sample_ratio_n=n,sample_ratio_d=d)
+        train_dataset = SDFDataset(obj_list[i], size=args.steps_per_epoch, num_samples=args.num_samples,sample_ratio_n=n,sample_ratio_d=d)
         train_loader = torch.utils.data.DataLoader(train_dataset, batch_size=1, shuffle=True)
         train_datasets.append(train_dataset)
         train_loaders.append(train_loader)
@@ -146,7 +138,7 @@ if __name__ == '__main__':
     # scheduler = lambda optimizer: torch.optim.lr_scheduler.MultiStepLR(optimizer,[6,6,4,4,2], gamma=0.1, last_epoch=-1)
     subset_n = _n
     trainer = Trainer('ngp', _n, models,W,N,M, B1,workspace=workspace1,enc_optimizer=enc_optimizer,  net_optimizer=net_optimizer, w_optimizer = w_optimizer, criterion=criterion, ema_decay=0.95, fp16=False, lr_scheduler=scheduler, use_checkpoint='latest', eval_interval=1,scheduler_update_every_step=False)
-    trainer.w_train(mode,False,train_loaders,500,subset_n)
+    trainer.w_train(mode,False,train_loaders,args.epochs,subset_n)
 
     
     # save_mesh(models,mode,W,N,M,save_path=workspace1)
