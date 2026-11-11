@@ -9,3 +9,8 @@
 
 # Ignore specific file
 
+# bytecode written when the scripts run
+__pycache__/
+# a mesh set linked into a checkout (kairos/data/README.md)
+/data
+
