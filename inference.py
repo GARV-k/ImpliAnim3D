@@ -66,7 +66,9 @@ def save_mesh(models, mode,no_of_rots,W=None,N=None,M=None,save_path='inferences
 if __name__ == '__main__':
 
     from pipeline_args import pipeline_parser, parse, as_dir
-    parser = pipeline_parser("Apply the W of --workspace to the hash tables of the unrotated meshes and extract the meshes.", epochs=0)
+    # --n, --d, --hashmap-size and --obj-no only name the default workspace here
+    parser = pipeline_parser("Apply the W of --workspace to the hash tables of the unrotated meshes and extract the meshes.",
+                             unused=("--data-root", "--epochs", "--steps-per-epoch", "--num-samples", "--lr"))
     parser.add_argument("--out", default="inferences/GT2/", help="directory for the extracted meshes")
     parser.add_argument("--resolution", type=int, default=256, help="marching cubes resolution")
     parser.add_argument("--no-of-rots", type=int, default=1, help="with k > 1, also apply W^2 ... W^k")

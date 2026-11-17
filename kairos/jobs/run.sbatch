@@ -9,6 +9,7 @@
 #     python -u train_GT2.py --data-root "$IA3D_DATA/sets/shapenet_rr60/obj_meshes" --workspace "$IA3D_RUNS/exp1"
 : "${IA3D_REPO:=${SLURM_SUBMIT_DIR:?}}"
 source "$IA3D_REPO/kairos/config.sh"
+[ $# -gt 0 ] || { echo "run.sbatch: no command given (usage: kairos/sbatch.sh kairos/jobs/run.sbatch <command> [arguments])" >&2; exit 2; }
 hostname; nvidia-smi -L; date
 echo "+ $*"
 "$IA3D_REPO/kairos/in_env.sh" "$@"

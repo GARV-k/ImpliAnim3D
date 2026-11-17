@@ -28,6 +28,9 @@ import numpy as np, trimesh, igl
 from scipy import ndimage
 from skimage.measure import marching_cubes
 
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), os.pardir))
+from _paths import EMPTY_MODELS
+
 NORM_SCALE = 1.03       # DeepSDF: shape fits a sphere of radius 1/1.03
 GRID = 256              # distance-field lattice resolution
 GRID_HALF = 1.05        # lattice covers [-GRID_HALF, GRID_HALF]^3
@@ -116,7 +119,11 @@ def process(args):
         pos, neg = data[sd >= 0], data[sd < 0]
         if len(neg) < 50000 or len(pos) < 50000:
             return inst, "WARN unbalanced pos=%d neg=%d shell_faces=%d" % (len(pos), len(neg), len(SF)), time.time() - t0
-        np.savez(os.path.join(out_dir, "samples", inst + ".npz"), pos=pos, neg=neg)
+        # written under another name first: a shape counts as done once its .npz exists, so a file cut short
+        # by the job's time limit must never carry the final name
+        npz = os.path.join(out_dir, "samples", inst + ".npz")
+        with open(npz + ".tmp", "wb") as fh: np.savez(fh, pos=pos, neg=neg)
+        os.replace(npz + ".tmp", npz)
         return inst, "ok pos=%d neg=%d in_faces=%d shell_faces=%d watertight=%s" % (
             len(pos), len(neg), len(F), len(SF), shell.is_watertight), time.time() - t0
     except Exception:
@@ -145,16 +152,19 @@ if __name__ == "__main__":
     si, sn = map(int, a.shard.split("/")); ids = ids[si::sn]
     if a.limit: ids = ids[: a.limit]
     os.makedirs(os.path.join(a.out, "samples"), exist_ok=True); os.makedirs(os.path.join(a.out, "meshes"), exist_ok=True)
+    synset = os.path.basename(os.path.normpath(a.shapenet_dir))
     todo = []
+    n_ok = n_bad = 0
     for i, inst in enumerate(ids):
         if os.path.exists(os.path.join(a.out, "samples", inst + ".npz")): continue
+        if (synset, inst) in EMPTY_MODELS: print(inst, "SKIPPED (ShapeNet OBJ without geometry)", flush=True); continue
         obj = os.path.join(a.shapenet_dir, inst, "model.obj")
-        if not os.path.exists(obj): print(inst, "MISSING", flush=True); continue
+        if not os.path.exists(obj): print(inst, "MISSING", flush=True); n_bad += 1; continue
         todo.append((inst, obj, a.out, a.n_samples, 1000 + i))
     print("ids: %d, to process: %d, workers: %d, grid: %d" % (len(ids), len(todo), a.workers, GRID), flush=True)
-    n_ok = n_bad = 0
     with Pool(a.workers) as pool:
         for k, (inst, status, dt) in enumerate(pool.imap_unordered(process, todo)):
             n_ok += status.startswith("ok"); n_bad += not status.startswith("ok")
             print("[%d/%d] %s %s (%.1fs)" % (k + 1, len(todo), inst, status, dt), flush=True)
     print("DONE ok=%d bad=%d" % (n_ok, n_bad), flush=True)
+    sys.exit(1 if n_bad else 0)  # a shape that failed, gave no usable samples, or has no model.obj

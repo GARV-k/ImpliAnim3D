@@ -71,6 +71,28 @@ def symlink(target, path):
     os.replace(tmp, path)
 
 
+def stray_files(out, indices, angles):
+    """Mesh files under <out>/obj_meshes* that a manifest with these indices and angles does not list."""
+    listed = {"obj_meshes"} | {"obj_meshes_%g" % x for x in angles}
+    names = {"%d.obj" % i for i in indices}
+    strays = []
+    for d in sorted(os.listdir(out)):
+        if d.startswith("obj_meshes") and os.path.isdir(os.path.join(out, d)):
+            strays += [os.path.join(out, d, f) for f in sorted(os.listdir(os.path.join(out, d)))
+                       if f.endswith(".obj") and (d not in listed or f not in names)]
+    return strays
+
+
+def remove_strays(out, indices, angles):
+    strays = stray_files(out, indices, angles)
+    for path in strays:
+        os.remove(path)
+    for d in {os.path.dirname(path) for path in strays}:
+        if not os.listdir(d):
+            os.rmdir(d)
+    return len(strays)
+
+
 def main():
     ap = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     ap.add_argument("--n", type=int, default=60, help="number of meshes (indices 1..n)")
@@ -80,7 +102,9 @@ def main():
     ap.add_argument("--root", help="preprocessed ShapeNet root (default: $IA3D_DATA/shapenet)")
     ap.add_argument("--split", default=_paths.SPLIT)
     ap.add_argument("--synsets", help="comma-separated synset ids to draw from (default: all of the split file)")
-    ap.add_argument("--force", action="store_true", help="rewrite rotated meshes and replace a manifest that disagrees")
+    ap.add_argument("--force", action="store_true",
+                    help="replace the set: rewrite the rotated meshes, replace a manifest that disagrees and "
+                         "remove the mesh files the new selection does not list")
     a = ap.parse_args()
 
     name = a.name or "shapenet_rr%d" % a.n
@@ -102,6 +126,7 @@ def main():
 
     manifest_path = os.path.join(out, "manifest.json")
     angles = sorted(set(a.angles))
+    selection = "round-robin over %d synsets, k-th model id of each synset in round k" % len(synsets)
     if os.path.exists(manifest_path) and not a.force:
         with open(manifest_path) as f:
             old = json.load(f)
@@ -109,8 +134,8 @@ def main():
         if clash:
             sys.exit("%s already holds a different selection (first at index %d); use --force or another --name"
                      % (out, clash[0]))
-        if len(old["meshes"]) > len(meshes):  # never shrink: keep the entries a larger earlier build made
-            meshes = old["meshes"]
+        if len(old["meshes"]) > len(meshes):  # never shrink: keep the larger earlier build and its description
+            meshes, name, selection = old["meshes"], old["name"], old["selection"]
         angles = sorted(set(angles) | set(old["angles"]))
 
     os.makedirs(os.path.join(out, "obj_meshes"), exist_ok=True)
@@ -124,13 +149,17 @@ def main():
             if a.force or not os.path.exists(dst):
                 rotate_obj(m["source"], dst, angle)
                 n_rotated += 1
+    if a.force:  # the only case in which the set can shrink or lose an angle
+        n_removed = remove_strays(out, {m["index"] for m in meshes}, angles)
+        if n_removed:
+            print("removed %d mesh files of the previous selection" % n_removed)
 
     manifest = {
         "name": name,
         "layout": {"original": "obj_meshes/<index>.obj", "rotated": "obj_meshes_<angle>/<index>.obj"},
         "rotation": "x' = x cos a - z sin a, y' = y, z' = x sin a + z cos a (shift_objs.rotate_vertices_y)",
         "angles": angles,
-        "selection": "round-robin over %d synsets, k-th model id of each synset in round k" % len(synsets),
+        "selection": selection,
         "split": os.path.basename(a.split),
         "shapenet_root": root,
         "meshes": meshes,

@@ -23,12 +23,20 @@ echo "### pip"; python3 -m pip --version; python3 -m pip config list
 echo "PIP_CONSTRAINT=${PIP_CONSTRAINT:-<unset>}  PYTHONPATH=${PYTHONPATH:-<unset>}"
 python3 -c "import ensurepip, venv; print(\"ensurepip + venv available\")"
 unset PIP_CONSTRAINT
-python3 -m pip list --format=freeze 2>/dev/null > "$IA3D_LOGS/container-freeze.txt"
+# written to a temporary name first: fetch.sh must never read a list that pip left half written
+if python3 -m pip list --format=freeze 2>/dev/null > "$IA3D_LOGS/container-freeze.txt.tmp" && [ -s "$IA3D_LOGS/container-freeze.txt.tmp" ]; then
+  mv "$IA3D_LOGS/container-freeze.txt.tmp" "$IA3D_LOGS/container-freeze.txt"
+else
+  rm -f "$IA3D_LOGS/container-freeze.txt.tmp"; echo "pip list failed: container-freeze.txt not written" >&2; exit 1
+fi
 echo "packages in the container: $(wc -l < "$IA3D_LOGS/container-freeze.txt")"
 echo "### modules the repo imports"
 for m in tinycudann torch_ema tensorboardX rich pandas matplotlib cv2 mcubes pysdf jaxtyping viser skimage igl \
          trimesh tqdm imageio packaging scipy numpy lpips torchmetrics torchvision pybind11 Cython setuptools wheel; do
   python3 -c "import $m; print(\"  $m\", getattr($m, \"__version__\", \"?\"))" 2>&1 | tail -1
 done
+exit 0
 '
-echo PROBE_DONE
+status=$?
+if [ "$status" -eq 0 ]; then echo PROBE_DONE; else echo "PROBE_FAILED (exit $status)"; fi
+exit $status

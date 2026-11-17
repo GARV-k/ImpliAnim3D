@@ -5,12 +5,17 @@ network with the ground-truth SDF of the mesh and with its surface, reads the tr
 tensorboard event files, checks that test.py left the shared decoder untouched, and checks the outputs of
 train_weights.py and inference.py. Writes <run>/summary.json and exits non-zero if a sanity condition fails.
 
+Every error and loss is printed next to the value an all-zero output gets on the same points. That is the
+state every fit starts from, and without it small numbers mislead: within 0.01 of the surface the SDF itself
+is below 0.01, so a field that learnt nothing has a "near surface" error of 0.008.
+
 Asserted: every checkpoint and output exists; shared-decoder training and W training reduce their loss; every
-training field is close to the SDF near the surface and marching cubes finds a surface in it; the decoder is
-unchanged by test.py; W is finite.
-Reported only: inside/outside IoU and surface distance (unless --min-iou / --max-chamfer are given), which
-measure how good a fit is, and the fit of the unseen mesh, which may still sit on its starting plateau after
-a run this short (printed as a NOTE).
+training field has less than half the error of the all-zero field on uniform points, and marching cubes finds
+a surface in it; the decoder is unchanged by test.py; W is finite.
+Reported only: the near-surface error, inside/outside IoU and surface distance (the last two can be asserted
+with --min-iou / --max-chamfer), which measure how good a fit is; the fit of the unseen mesh, which may still
+sit on its starting plateau after a run this short; and whether W training got below the all-zero loss, which
+it does not in 200 steps. The last two are printed as a NOTE.
 """
 import argparse
 import glob
@@ -25,6 +30,7 @@ import torch
 import trimesh
 from scipy.spatial import cKDTree
 
+from loss import mape_loss
 from sdf.network_tcnn import SDFNetwork
 from sdf.provider import SDFDataset
 from sdf.utils2 import extract_geometry
@@ -39,15 +45,21 @@ def load_model(enc_path, mlp_path):
 
 @torch.no_grad()
 def evaluate(model, obj_path, rng, n_points=100_000, resolution=128):
-    """Errors of the fitted field against the SDF and the surface of the mesh, as SDFDataset normalises it."""
-    ds = SDFDataset(obj_path, size=1, num_samples=2 ** 14)
+    """Errors of the fitted field against the SDF and the surface of the mesh, as SDFDataset normalises it.
+
+    zero_mae_* is the error of an all-zero field on the same points, zero_loss the training loss of an all-zero
+    output under the sampling the pipeline scripts use by default (--n 2 --d 3).
+    """
+    ds = SDFDataset(obj_path, size=1, num_samples=2 ** 18, sample_ratio_n=2, sample_ratio_d=3)
     uniform = rng.uniform(-1, 1, (n_points, 3)).astype(np.float32)
     near = (ds.mesh.sample(n_points) + 0.01 * rng.standard_normal((n_points, 3))).astype(np.float32)
-    out = {}
+    target = torch.from_numpy(ds[0]["sdfs"]).float()
+    out = {"zero_loss": float(mape_loss(torch.zeros_like(target), target))}
     for name, pts in (("uniform", uniform), ("near_surface", near)):
         gt = -ds.sdf_fn(pts)  # negative inside, as in SDFDataset
         pred = model(torch.from_numpy(pts).cuda()).squeeze(1).float().cpu().numpy()
         out[f"sdf_mae_{name}"] = float(np.abs(pred - gt).mean())
+        out[f"zero_mae_{name}"] = float(np.abs(gt).mean())
         if name == "uniform":
             inside_gt, inside_pred = gt < 0, pred < 0
             out["inside_iou"] = float((inside_gt & inside_pred).sum() / max((inside_gt | inside_pred).sum(), 1))
@@ -106,8 +118,9 @@ def main():
     ap.add_argument("--run", required=True, help="run directory of the smoke job (holds workspace, unseen, inference)")
     ap.add_argument("--num-objs", type=int, required=True)
     ap.add_argument("--test-idx", type=int, default=40)
-    ap.add_argument("--max-near-surface-error", type=float, default=0.02,
-                    help="largest accepted mean |sdf error| within about 0.01 of the surface")
+    ap.add_argument("--max-relative-error", type=float, default=0.5,
+                    help="largest accepted |sdf error| of a training field on uniform points, as a fraction of the "
+                         "error an all-zero field has on the same points")
     ap.add_argument("--min-iou", type=float, default=None, help="if given, the inside/outside IoU every field must reach")
     ap.add_argument("--max-chamfer", type=float, default=None, help="if given, the largest accepted surface distance (meshes span about 1.9)")
     a = ap.parse_args()
@@ -128,7 +141,8 @@ def main():
         fields.append((f"train {k + 1}", f"{ws}/GT_enc_{2 * k}.pth", f"{ws}/GT_mlp.pth", f"{a.set}/obj_meshes/{k + 1}.obj", True))
         fields.append((f"train {k + 1} rot90", f"{ws}/GT_enc_{2 * k + 1}.pth", f"{ws}/GT_mlp.pth", f"{a.set}/obj_meshes_90/{k + 1}.obj", True))
     fields.append((f"unseen {a.test_idx}", f"{unseen}/GT_enc_0.pth", f"{unseen}/GT_mlp.pth", f"{a.set}/obj_meshes/{a.test_idx}.obj", False))
-    print(f"{'field':<16} {'|sdf err| uniform':>18} {'near surface':>13} {'inside IoU':>11} {'chamfer':>9} {'vertices':>9}")
+    print("|sdf error| of each fitted field; (zero) is the error of an all-zero field on the same points")
+    print(f"{'field':<16} {'uniform':>8} {'(zero)':>8} {'near surface':>13} {'(zero)':>8} {'inside IoU':>11} {'chamfer':>9} {'vertices':>9}")
     preview = []
     for name, enc, mlp, obj, strict in fields:
         if not (os.path.isfile(enc) and os.path.isfile(mlp)):
@@ -137,11 +151,13 @@ def main():
         r, points = evaluate(load_model(enc, mlp), obj, rng)
         preview.append((name, points))
         summary["fields"].append({"field": name, "mesh": obj, **r})
-        print(f"{name:<16} {r['sdf_mae_uniform']:>18.4f} {r['sdf_mae_near_surface']:>13.4f} {r['inside_iou']:>11.3f} "
-              f"{r.get('chamfer', float('nan')):>9.4f} {r['extracted_vertices']:>9d}")
+        print(f"{name:<16} {r['sdf_mae_uniform']:>8.4f} {r['zero_mae_uniform']:>8.4f} {r['sdf_mae_near_surface']:>13.4f} "
+              f"{r['zero_mae_near_surface']:>8.4f} {r['inside_iou']:>11.3f} {r.get('chamfer', float('nan')):>9.4f} "
+              f"{r['extracted_vertices']:>9d}")
         need(r["extracted_vertices"] > 0, f"{name}: marching cubes found no surface", strict)
-        need(r["sdf_mae_near_surface"] <= a.max_near_surface_error,
-             f"{name}: near-surface |sdf error| {r['sdf_mae_near_surface']:.4f} > {a.max_near_surface_error}", strict)
+        relative = r["sdf_mae_uniform"] / r["zero_mae_uniform"]
+        need(relative <= a.max_relative_error,
+             f"{name}: |sdf error| on uniform points is {relative:.2f} of the all-zero field's (limit {a.max_relative_error})", strict)
         if a.min_iou is not None:
             need(r["inside_iou"] >= a.min_iou, f"{name}: inside IoU {r['inside_iou']:.3f} < {a.min_iou}", strict)
         if a.max_chamfer is not None:
@@ -152,23 +168,37 @@ def main():
         save_preview(os.path.join(a.run, "fields.png"), preview)
         print(f"preview: {os.path.join(a.run, 'fields.png')}")
 
-    # 2. losses, read back from the event files. Training the shared decoder and W must reduce the loss by 5%
-    #    or more; the unseen-mesh fit only has to stay finite and not get worse (see above).
+    # 2. losses, read back from the event files, next to the loss of an all-zero output on the same meshes.
+    #    Training the shared decoder and W must reduce the loss by 5% or more; the unseen-mesh fit only has to
+    #    stay finite and not get worse (see above).
     stage_runs = loss_curves(os.path.join(ws, "run", "ngp"))
     unseen_runs = loss_curves(os.path.join(unseen, "run", "ngp"))
     shared = [r for r in stage_runs if not r["trains_W"]]
     w_runs = [r for r in stage_runs if r["trains_W"]]
+
+    def zero_loss(select):  # mean all-zero loss over the evaluated fields whose name satisfies select
+        values = [f["zero_loss"] for f in summary["fields"] if select(f["field"])]
+        return float(np.mean(values)) if values else float("nan")
+
     print()
-    for label, runs, per, strict in (("shared-decoder training", shared, 2 * a.num_objs, True),
-                                     ("unseen-mesh fit", unseen_runs, 1, False), ("W training", w_runs, a.num_objs, True)):
+    for label, runs, per, strict, zero in (
+            ("shared-decoder training", shared, 2 * a.num_objs, True, zero_loss(lambda n: n.startswith("train"))),
+            ("unseen-mesh fit", unseen_runs, 1, False, zero_loss(lambda n: n.startswith("unseen"))),
+            ("W training", w_runs, a.num_objs, True, zero_loss(lambda n: n.endswith("rot90")))):
         need(len(runs) > 0, f"{label}: no loss curve found")
         for r in runs:
-            r["first_per_mesh"], r["last_per_mesh"] = r["first"] / per, r["last"] / per
-            print(f"{label:<24} {r['steps']:>5d} steps, loss per mesh {r['first_per_mesh']:.4f} -> {r['last_per_mesh']:.4f}")
+            r["first_per_mesh"], r["last_per_mesh"], r["zero_per_mesh"] = r["first"] / per, r["last"] / per, zero
+            print(f"{label:<24} {r['steps']:>5d} steps, loss per mesh {r['first_per_mesh']:.4f} -> {r['last_per_mesh']:.4f}"
+                  f"   (all-zero output: {zero:.4f})")
             need(np.isfinite(r["last"]) and r["last"] <= 1.05 * r["first"], f"{label}: loss got worse ({r['first']:.4f} -> {r['last']:.4f})")
             need(r["last"] < 0.95 * r["first"],
                  f"{label}: loss did not move ({r['first_per_mesh']:.4f} -> {r['last_per_mesh']:.4f} per mesh): still on the "
                  f"all-zero plateau" + ("" if strict else "; rerun or raise SMOKE_UNSEEN_EPOCHS"), strict)
+            if label == "W training":
+                need(not r["last_per_mesh"] > zero,
+                     f"W training ended at {r['last_per_mesh']:.2f} per mesh, above the {zero:.2f} of an all-zero output: after "
+                     f"{r['steps']} steps the tables transformed by W decode to worse than a blank field, so the W stage "
+                     f"and the meshes in inference/ only show that the code runs", strict=False)
     summary["losses"] = {"shared_decoder": shared, "unseen": unseen_runs, "W": w_runs}
 
     # 3. test.py must leave the shared decoder untouched

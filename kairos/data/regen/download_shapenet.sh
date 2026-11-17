@@ -37,9 +37,14 @@ if [ -d "$EXT/ShapeNetCore.v1" ]; then
   echo "### $EXT/ShapeNetCore.v1 exists, not extracting"
 else
   echo "### extracting the first $N models of every synset -> $EXT ($(date))"
-  python3 "$HERE/extract_subset.py" "$ZIP" "$EXT" "$N" "$EXT/split.json"
+  # Extracted under another name and renamed at the end, so that an interrupted extraction is not taken for a
+  # complete one by the test above. A rerun extracts over what is already there.
+  python3 "$HERE/extract_subset.py" "$ZIP" "$EXT.partial" "$N" "$EXT.partial/split.json"
   if [ "$N" = 200 ]; then
-    cmp "$EXT/split.json" "$HERE/../splits/shapenet_v1_200_per_category.json" && echo "split identical to the one in the repo"
+    cmp "$EXT.partial/split.json" "$HERE/../splits/shapenet_v1_200_per_category.json" \
+      || { echo "this zip does not give the split in kairos/data/splits (extraction left in $EXT.partial)" >&2; exit 1; }
+    echo "split identical to the one in the repo"
   fi
+  mv "$EXT.partial" "$EXT"
 fi
 echo DOWNLOAD_DONE

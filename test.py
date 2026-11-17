@@ -38,7 +38,8 @@ def save_mesh(models, N=None,M=None,save_path='meshes_using_hashencoder/', resol
 
 if __name__ == '__main__':
     from pipeline_args import pipeline_parser, parse, as_dir
-    parser = pipeline_parser("Fit the hash table of an unseen mesh with the shared decoder of --workspace kept frozen.", epochs=1000)
+    parser = pipeline_parser("Fit the hash table of an unseen mesh with the shared decoder of --workspace kept frozen.", epochs=1000,
+                             unused=("--num-objs",))
     parser.add_argument("--test-workspace", default="test/", help="where the fitted table of the unseen mesh is saved")
     parser.add_argument("--test-obj", default=None, help="unseen mesh (default: <data-root>/40.obj)")
     args = parse(parser)

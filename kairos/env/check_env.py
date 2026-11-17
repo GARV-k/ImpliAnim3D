@@ -109,6 +109,11 @@ def _():
         w.add_scalar("x", 1.0, 0)
         w.close()
         assert any(f.startswith("events.out") for f in os.listdir(d))
+        # kairos/jobs/verify_smoke.py reads the losses back with the container's tensorboard
+        from tensorboard.backend.event_processing.event_accumulator import EventAccumulator
+        acc = EventAccumulator(d)
+        acc.Reload()
+        assert [e.value for e in acc.Scalars("x")] == [1.0]
     return (f"cv2 {cv2.__version__}, trimesh {trimesh.__version__}, pandas {pandas.__version__}, "
             f"tensorboardX {tensorboardX.__version__}, jaxtyping {jaxtyping.__version__}")
 

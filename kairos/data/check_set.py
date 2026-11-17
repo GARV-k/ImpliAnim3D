@@ -13,6 +13,8 @@ For every index of the manifest:
      reported as a warning instead of a failure;
   6. with pysdf: the SDF of the normalised rotated mesh at R p equals the SDF of the normalised original at p
      for random p in [-1, 1]^3, and the cube corner is outside (pysdf is positive inside; SDFDataset negates it).
+For the set as a whole: no mesh file under obj_meshes* that the manifest does not list (the scripts address
+meshes by index, so such a file would be read without having been checked).
 Exits non-zero if any check fails.
 """
 import argparse
@@ -23,7 +25,7 @@ import sys
 import numpy as np
 import trimesh
 
-from make_legacy_set import cos_sin
+from make_legacy_set import cos_sin, stray_files
 
 try:
     import pysdf
@@ -134,9 +136,13 @@ def main():
             print("      FAIL " + msg)
         for msg in warns:
             print("      WARN " + msg)
-    print("checked %d meshes: %d failed, %d with warnings" % (len(entries), n_fail, n_warn))
-    print("CHECK_SET_OK" if not n_fail else "CHECK_SET_FAILED")
-    sys.exit(1 if n_fail else 0)
+    strays = stray_files(a.set_dir, {m["index"] for m in manifest["meshes"]}, manifest["angles"])
+    for path in strays[:20]:
+        print("FAIL not listed in the manifest: " + path)
+    print("checked %d meshes: %d failed, %d with warnings; %d mesh files not in the manifest"
+          % (len(entries), n_fail, n_warn, len(strays)))
+    print("CHECK_SET_OK" if not (n_fail or strays) else "CHECK_SET_FAILED")
+    sys.exit(1 if n_fail or strays else 0)
 
 
 if __name__ == "__main__":

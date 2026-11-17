@@ -19,10 +19,15 @@ echo "### 1. mesh set $SET"
 "$IA3D_REPO/kairos/in_env.sh" python -u kairos/data/check_set.py "$SET"
 
 echo; echo "### 2. regenerate one model of $SYNSET and compare with the linked data"
-mkdir -p "$SCRATCH"
-"$IA3D_REPO/kairos/in_env.sh" python -u kairos/data/regen/preprocess_sdf.py --all --limit 1 --workers 1 \
-  --shapenet-dir "$IA3D_DATA/raw/ShapeNetCore.v1/extracted_200/ShapeNetCore.v1/$SYNSET" --out "$SCRATCH/$SYNSET"
-"$IA3D_REPO/kairos/in_env.sh" python -u kairos/data/regen/compare_regen.py "$SCRATCH/$SYNSET" "$IA3D_DATA/shapenet/$SYNSET"
-rm -rf "$SCRATCH"
+RAW=$IA3D_DATA/raw/ShapeNetCore.v1/extracted_200/ShapeNetCore.v1/$SYNSET
+if [ -d "$RAW" ]; then
+  mkdir -p "$SCRATCH"
+  "$IA3D_REPO/kairos/in_env.sh" python -u kairos/data/regen/preprocess_sdf.py --all --limit 1 --workers 1 \
+    --shapenet-dir "$RAW" --out "$SCRATCH/$SYNSET"
+  "$IA3D_REPO/kairos/in_env.sh" python -u kairos/data/regen/compare_regen.py "$SCRATCH/$SYNSET" "$IA3D_DATA/shapenet/$SYNSET"
+  rm -rf "$SCRATCH"
+else  # kairos/data/link_shapenet.sh links the raw download only where it exists
+  echo "SKIPPED: raw ShapeNet not found at $RAW"
+fi
 date
 echo CHECK_DATA_OK

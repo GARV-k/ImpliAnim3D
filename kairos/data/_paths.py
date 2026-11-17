@@ -1,7 +1,7 @@
 """Locations shared by the data tools. Standard library only (the tools also run on the login node).
 
-kairos/config.sh stays the single source of truth for the stage layout: when IA3D_DATA is not in the
-environment, it is read from there.
+kairos/config.sh stays the single source of truth for the stage layout: the data directory is always asked
+from it, never taken from an IA3D_DATA that an earlier `source kairos/config.sh` left in the environment.
 """
 import json
 import os
@@ -25,12 +25,10 @@ def work_path(path):
 
 
 def data_dir():
-    """$IA3D_DATA, or its default from kairos/config.sh."""
-    d = os.environ.get("IA3D_DATA")
-    if not d:
-        cfg = os.path.join(HERE, "..", "config.sh")
-        d = subprocess.run(["bash", "-c", 'source "$1" && printf %s "$IA3D_DATA"', "bash", cfg],
-                           check=True, capture_output=True, text=True).stdout
+    """$IA3D_DATA as kairos/config.sh derives it (from $IA3D_STAGE, or from its default)."""
+    cfg = os.path.join(HERE, "..", "config.sh")
+    d = subprocess.run(["bash", "-c", 'source "$1" && printf %s "$IA3D_DATA"', "bash", cfg],
+                       check=True, capture_output=True, text=True).stdout
     return work_path(d)
 
 

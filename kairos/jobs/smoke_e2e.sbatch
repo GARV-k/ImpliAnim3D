@@ -11,6 +11,7 @@
 #   4. inference.py      meshes decoded from the W-transformed tables
 #   5. verify_smoke.py   measures the fitted fields and reads the losses back
 # Usage: kairos/sbatch.sh kairos/jobs/smoke_e2e.sbatch [set name]        (default: shapenet_rr60)
+# Stages 3 and 4 only show that the code runs: 200 steps leave W far from anything useful (see kairos/README.md).
 # Tunables (environment): SMOKE_NUM_OBJS, SMOKE_EPOCHS, SMOKE_UNSEEN_EPOCHS, SMOKE_W_EPOCHS, SMOKE_LR
 : "${IA3D_REPO:=${SLURM_SUBMIT_DIR:?}}"
 source "$IA3D_REPO/kairos/config.sh"
@@ -22,8 +23,10 @@ N=${SMOKE_NUM_OBJS:-3}
 EPOCHS=${SMOKE_EPOCHS:-10}                # checkpoints are written on even epochs
 UNSEEN_EPOCHS=${SMOKE_UNSEEN_EPOCHS:-20}  # the frozen-decoder fit waits on a plateau for a random number of steps
 W_EPOCHS=${SMOKE_W_EPOCHS:-2}
-LR=${SMOKE_LR:-1e-3}                      # the scripts default to 1e-4, which needs far more steps
+LR=${SMOKE_LR:-1e-3}                      # stages 1 and 2 only: the scripts' default of 1e-4 needs far more steps.
+                                          # Stage 3 runs at that default
 [ -f "$SET/manifest.json" ] || { echo "mesh set $SET not found: run kairos/data/make_legacy_set.py" >&2; exit 1; }
+[ -e "$SET/obj_meshes/40.obj" ] || { echo "mesh set $SET has no mesh 40, which test.py fits as the unseen one: build it with --n 40 or more" >&2; exit 1; }
 mkdir -p "$RUN"
 
 stage() {  # stage <title> <command...>: runs the command in the project environment and reports its duration

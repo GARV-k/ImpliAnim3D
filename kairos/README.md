@@ -19,7 +19,7 @@ Tracked, in this directory:
 
 | Path | Purpose |
 |---|---|
-| `config.sh` | Every cluster setting (account, partition, container, stage directory). Overridable from the environment. |
+| `config.sh` | Every cluster setting. Account, partition, GPU request, container and stage directory can be set from the environment (`IA3D_ACCOUNT`, `IA3D_PARTITION`, `IA3D_GRES`, `IA3D_CONTAINER`, `IA3D_STAGE`); the repo root and the paths under the stage directory are derived from them every time. |
 | `sbatch.sh` | `sbatch` wrapper that applies `config.sh` and sends logs to the stage directory. |
 | `in_env.sh` | Runs a command inside the container with the venv active, from the repo root. GPU nodes only. |
 | `env/` | Requirement lists, `fetch.sh` (login node), `build_in_container.sh`, `activate.sh`, `check_env.py`. |
@@ -90,6 +90,10 @@ kairos/sbatch.sh --time=12:00:00 --job-name=shared-dec kairos/jobs/run.sbatch \
   python -u train_GT2.py --data-root "$IA3D_DATA/sets/shapenet_rr60/obj_meshes" --workspace "$IA3D_RUNS/exp1"
 ```
 
+Every `kairos/` command works out the repo it belongs to and the stage paths by itself, so the variables that
+`source kairos/config.sh` leaves in your shell are a convenience for typing paths and nothing depends on
+them: you can change checkout or `IA3D_STAGE` in the same shell.
+
 Interactively, from a shell on an allocated GPU node (`salloc` with the same account, partition and
 `--gres` as in `config.sh`):
 
@@ -99,32 +103,41 @@ kairos/in_env.sh bash                               # or a shell with the venv a
 ```
 
 Inside the container use `/work/...` paths: `/gpfs/work` is not mounted there. `config.sh` rewrites the
-paths it derives.
+paths it derives. The repo and the stage directory have to be somewhere the container can see (`in_env.sh`
+binds `/work` and `/tmpdir`); if the environment cannot be activated in there, `in_env.sh` stops with an error.
 
 ## The pipeline scripts
 
-The four scripts take the same options (`pipeline_args.py`); the defaults are the values that used to be
-hard-coded, so a script without arguments behaves as before. `--help` lists them.
+The four scripts share their options (`pipeline_args.py`). The defaults are the values that used to be
+hard-coded, so a script without arguments reads and writes the same files as before. What it does differs in
+one case: `train_GT2.py` now also trains the decoder (see the next section). `--help` lists the options.
+
+Mesh `i` is `<i>.obj`, counted from 1; its tables are `GT_enc_<2i-2>.pth` (unrotated) and `GT_enc_<2i-1>.pth`
+(rotated).
 
 | Script | What it does | Reads | Writes |
 |---|---|---|---|
-| `train_GT2.py` | Shared decoder and one hash table per mesh, for meshes `1..num-objs`, each unrotated and rotated | `<data-root>/<i>.obj`, `<data-root>_90/<i>.obj` | `<workspace>/GT_mlp.pth`, `GT_enc_<k>.pth` (even k unrotated, odd k rotated) |
+| `train_GT2.py` | Shared decoder and one hash table per mesh, for meshes `1..num-objs`, each unrotated and rotated | `<data-root>/<i>.obj`, `<data-root>_90/<i>.obj` | `<workspace>/GT_mlp.pth`, `GT_enc_<2i-2>.pth`, `GT_enc_<2i-1>.pth` |
 | `test.py` | Hash table of an unseen mesh with the decoder frozen | `<workspace>/GT_mlp.pth`, `--test-obj` (default `<data-root>/40.obj`) | `<test-workspace>/GT_enc_0.pth` |
-| `train_weights.py` | W on the rotated meshes with tables and decoder frozen | `<workspace>/GT_mlp.pth`, `GT_enc_<2i>.pth`, `<data-root>_90/<i>.obj` | `<workspace>/W.pth` |
-| `inference.py` | Decodes the W-transformed tables and extracts meshes | `<workspace>` | `<out>/W_<j>.obj` |
+| `train_weights.py` | W that takes the table of each unrotated mesh to its rotated mesh, with tables and decoder frozen | `<workspace>/GT_mlp.pth`, `GT_enc_<2i-2>.pth`, `<data-root>_90/<i>.obj` | `<workspace>/W.pth` |
+| `inference.py` | Decodes the W-transformed tables of the unrotated meshes and extracts meshes | `<workspace>/GT_mlp.pth`, `GT_enc_<2i-2>.pth`, `W.pth` | `<out>/W_<i-1>.obj` |
 
 Common options: `--data-root`, `--workspace`, `--num-objs`, `--epochs`, `--steps-per-epoch`, `--num-samples`,
-`--lr`, `--hashmap-size`, `--n`, `--d`.
+`--lr`, `--hashmap-size`, `--n`, `--d`. A script does not accept the ones it has no use for: `test.py` fits
+one mesh and has no `--num-objs`; `inference.py` trains nothing and has no `--data-root`, `--epochs`,
+`--steps-per-epoch`, `--num-samples` or `--lr`.
 
 ## Changes made to the research code for this stack
 
 - **Options instead of constants:** `train_GT2.py`, `test.py`, `train_weights.py` and `inference.py` read the
-  data root, workspace, number of meshes, epochs and learning rate from the command line.
+  data root, workspace, number of meshes, epochs and learning rate from the command line. Without options
+  they use the old constants.
 - **`torch.load(..., weights_only=False)`:** the checkpoints are whole pickled modules, which PyTorch 2.6 and
   later refuses to load by default.
 - **Decoder update in `train_GT2.py`:** the trainer's decoder step was commented out, so shared-decoder
   training only moved the hash tables. `Trainer(train_net=...)` now controls it: `train_GT2.py` trains the
-  decoder (`--freeze-decoder` restores the old behaviour) and `test.py` keeps it frozen.
+  decoder and `test.py` keeps it frozen. This is the one change in what a script does by default;
+  `train_GT2.py --freeze-decoder` gives the old behaviour.
 - **`train_weights.py` creates W when the workspace has none** (random normal, the initialisation of the
   commented-out line); it used to require an existing `W.pth`.
 - **`hash_imports/scene_box.py`:** `viser` is imported inside the one method that uses it.
@@ -134,34 +147,50 @@ Common options: `--data-root`, `--workspace`, `--num-objs`, `--epochs`, `--steps
 `jobs/smoke_e2e.sbatch` runs the four scripts on meshes 1 to 3 of the set, each unrotated and rotated by 90
 degrees (six hash tables, one decoder), with mesh 40 as the unseen one. `jobs/verify_smoke.py` then measures
 the result and writes `summary.json` and `fields.png` into the run directory `$IA3D_RUNS/smoke-<job id>`.
-The test uses `--lr 1e-3`; the scripts' default of `1e-4` needs far more steps than a smoke test has.
+Stages 1 and 2 run at `--lr 1e-3`, because the scripts' default of `1e-4` needs far more steps than a smoke
+test has. Stage 3 runs at that default.
 
-Reference run: job 102992, one GH200, 2026-11-11, 15 min 31 s in total, `SMOKE_VERIFY_OK`.
+The test shows that every stage runs on this stack. It does not show that the method works, and stages 3
+and 4 show nothing beyond running (see below).
 
-| Stage | Steps | Time | Loss per mesh (mean of the first 20 steps -> last 20) |
-|---|---|---|---|
-| 1. `train_GT2.py`, 6 tables + decoder | 1,000 | 10 min 21 s | 0.378 -> 0.121 |
-| 2. `test.py`, unseen mesh, decoder frozen | 2,000 | 3 min 27 s | 0.382 -> 0.123 |
-| 3. `train_weights.py`, W on 3 rotated meshes | 200 | 1 min 17 s | 137 -> 1.54 |
-| 4. `inference.py`, 3 meshes at 64^3 | | 6 s | |
+Reference run: job 102992, one GH200, 2026-11-11, 15 min 31 s in total.
 
-What `verify_smoke.py` asserts: every checkpoint and output exists; stages 1 and 3 reduce their loss; every
-training field is within 0.02 of the true SDF near the surface (measured: 0.005 to 0.007) and has a zero
-level set; `test.py` leaves the decoder bit-identical; W is finite. It reports, without asserting, how good
-the fits are (inside/outside IoU, surface distance) and the fit of the unseen mesh.
+| Stage | Steps | Time | Loss per mesh (mean of the first 20 steps -> last 20) | Loss of an all-zero output |
+|---|---|---|---|---|
+| 1. `train_GT2.py`, 6 tables + decoder | 1,000 | 10 min 21 s | 0.378 -> 0.121 | 0.378 |
+| 2. `test.py`, unseen mesh, decoder frozen | 2,000 | 3 min 27 s | 0.382 -> 0.123 | 0.380 |
+| 3. `train_weights.py`, W on 3 rotated meshes | 200 | 1 min 17 s | 137 -> 1.54 | 0.378 |
+| 4. `inference.py`, 3 meshes at 64^3 | | 6 s | | |
 
-How to read the numbers of such a short run, so that they are not mistaken for a broken environment:
+The last column is what a network that outputs 0 everywhere scores on the same meshes. Every number of the
+test has to be read against that, because it is where every fit starts, and `verify_smoke.py` prints it next
+to each loss and error.
 
-- **0.378 is the loss of a network that outputs 0 everywhere** (0.37 to 0.39 depending on the mesh). Every
-  fit starts there and waits before it moves: about 60 steps when the decoder is trained, and anything from
-  250 steps to more than 600 when it is frozen. Two of three 600-step runs of `test.py` never left that
-  value, which is why the unseen-mesh fit gets 2,000 steps and is reported with a `NOTE` instead of failing
-  the test.
+What `verify_smoke.py` asserts: every checkpoint and output exists; stages 1 and 3 reduce their loss by 5% or
+more; every training field has at most half the error of the all-zero field on points drawn uniformly in the
+cube (measured: 0.19 to 0.27 of it) and has a zero level set; `test.py` leaves the decoder bit-identical; W
+is finite. It reports, without asserting, the error near the surface, inside/outside IoU and surface
+distance, the fit of the unseen mesh, and whether W got below the all-zero loss.
+
+How to read the numbers of such a short run, so that they are not mistaken for a broken environment or for
+a result:
+
+- **Every fit starts at the all-zero loss and waits there.** It moves after about 60 steps when the decoder
+  is trained, and after anything from 250 steps to more than 600 when it is frozen. Two of three 600-step
+  runs of `test.py` never left that value, which is why the unseen-mesh fit gets 2,000 steps and is reported
+  with a `NOTE` instead of failing the test.
+- **Stages 1 and 2 fit the shapes away from the surface, hardly at it.** On uniform points the fitted
+  fields are off by 0.09 to 0.12, where the all-zero field is off by 0.35 to 0.59. Within about 0.01 of the
+  surface they are off by 0.005 to 0.007, where the all-zero field is off by 0.007 to 0.008: there the SDF
+  itself is that small, so this number says little.
 - **The fits are not signed.** The network output is almost never negative: at most 5% of the points
-  inside a mesh are classified as inside (inside/outside IoU 0.00 to 0.06 over all runs), although the
-  field is accurate near the surface. A field
+  inside a mesh are classified as inside (inside/outside IoU 0.00 to 0.06 over all runs). A field
   that only touches zero has a ragged zero level set, which is what `fields.png` shows: the shapes are
   recognisable and surrounded by floaters. More steps do not change this: with 4,000 steps of stage 1
   (job 102989) the loss reached 0.103 and the output was still never negative. For reference, the exact
   unsigned distance `|sdf|` scores 0.06 to 0.10 under this loss and sampling, because only 8 to 10% of the
   samples lie inside a mesh.
+- **Stages 3 and 4 show only that the code runs.** W starts as random noise, and after 200 steps its loss
+  of 1.54 per mesh is still four times that of the all-zero output. The meshes `inference.py` extracts from
+  the W-transformed tables therefore mean nothing, and `verify_smoke.py` says so in a `NOTE`. For scale: in
+  the original logs (`Exp17/`, 25 meshes) W reached 0.31 per mesh after 50,000 steps.
