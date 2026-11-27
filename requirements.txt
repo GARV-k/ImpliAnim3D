@@ -1,19 +1,19 @@
-torch-ema
-ninja
-trimesh
-opencv-python
-tensorboardX
-torch
-numpy 
+# Install PyTorch with CUDA first (https://pytorch.org), then the tiny-cuda-nn PyTorch bindings:
+#   pip install git+https://github.com/NVlabs/tiny-cuda-nn/#subdirectory=bindings/torch
+# then: pip install -r requirements.txt
+numpy
 pandas
-tqdm
 matplotlib
-PyMCubes
-rich
-pysdf
-dearpygui
+opencv-python
 packaging
-scipy
-lpips
-imageio
-torchmetrics
+tqdm
+rich
+jaxtyping
+tensorboardX
+torch-ema
+trimesh
+pysdf
+PyMCubes
+# data preparation (close.py)
+libigl
+scikit-image

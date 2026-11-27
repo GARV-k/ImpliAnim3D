@@ -1,16 +1,17 @@
-# Ignore all `.log` files
+# logs, meshes, checkpoints and archives
 *.log
 *.obj
 *.pth
 *.zip
 *.tar
 *.tar.gz
-# Ignore the `node_modules` folder
-
-# Ignore specific file
-
 # bytecode written when the scripts run
 __pycache__/
 # a mesh set linked into a checkout (kairos/data/README.md)
 /data
 
+# outputs of the pipeline scripts with their default paths
+/hash_workspace_*/
+/test/
+/inferences/
+/datasets/

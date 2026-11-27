@@ -193,4 +193,4 @@ a result:
 - **Stages 3 and 4 show only that the code runs.** W starts as random noise, and after 200 steps its loss
   of 1.54 per mesh is still four times that of the all-zero output. The meshes `inference.py` extracts from
   the W-transformed tables therefore mean nothing, and `verify_smoke.py` says so in a `NOTE`. For scale: in
-  the original logs (`Exp17/`, 25 meshes) W reached 0.31 per mesh after 50,000 steps.
+  the original logs (`old_logs/Exp17/`, 25 meshes) W reached 0.31 per mesh after 50,000 steps.
